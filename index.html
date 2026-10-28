@@ -9,15 +9,21 @@
   #app{position:fixed;inset:0;width:100%;height:100%;border:0}
   #sc{position:fixed;inset:0;background:rgba(5,15,45,.92);z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff}
   #sc.on{display:flex}
-  #sc h3{margin:0 0 12px;font-size:19px}
-  .box{position:relative;width:min(92vw,420px);aspect-ratio:1/1;background:#000;border-radius:16px;overflow:hidden}
+  #sc h3{margin:0 0 12px;font-size:19px;text-align:center}
+  .box{position:relative;width:min(94vw,560px);aspect-ratio:4/3;max-height:58vh;background:#000;border-radius:16px;overflow:hidden}
   .box video{width:100%;height:100%;object-fit:cover;display:block}
-  .fr{position:absolute;inset:16%;border:3px solid #fff;border-radius:14px;box-shadow:0 0 0 999px rgba(5,15,45,.35)}
-  .fr::after{content:'';position:absolute;left:6px;right:6px;top:0;height:3px;background:#FF8A00;border-radius:3px;animation:sl 1.8s ease-in-out infinite}
-  @keyframes sl{0%,100%{top:6px}50%{top:calc(100% - 9px)}}
-  #msg{margin:14px 0;text-align:center;max-width:420px;line-height:1.5}
-  .b{border:0;border-radius:10px;padding:12px 22px;font:inherit;font-weight:700;font-size:15px;cursor:pointer;margin:4px}
-  .b.w{background:#fff;color:#0B2A6F}.b.r{background:#E5383B;color:#fff}
+  .fr{position:absolute;inset:25% 6%;border:3px solid #fff;border-radius:14px;box-shadow:0 0 0 999px rgba(5,15,45,.4);transition:border-color .15s}
+  .fr::after{content:'';position:absolute;left:6px;right:6px;top:50%;height:3px;background:#FF3B3B;border-radius:3px;box-shadow:0 0 8px #FF3B3B;animation:sl 1.6s ease-in-out infinite}
+  @keyframes sl{0%,100%{opacity:1}50%{opacity:.35}}
+  .box.hit .fr{border-color:#34D399}
+  .torch{position:absolute;right:10px;bottom:10px;width:50px;height:50px;border-radius:50%;border:0;background:rgba(255,255,255,.92);font-size:22px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.35)}
+  .torch.on{background:#FFD23F}
+  #msg{margin:14px 0;text-align:center;max-width:560px;line-height:1.5;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.1)}
+  #msg.ok{background:#DDF6E8;color:#0B6B34;font-weight:700}
+  #msg.err{background:#FFE9EA;color:#9B1C1F;font-weight:700}
+  .b{border:0;border-radius:10px;padding:12px 22px;font:inherit;font-weight:700;font-size:15px;cursor:pointer;margin:4px;display:inline-block}
+  .b.w{background:#fff;color:#0B2A6F}.b.r{background:#E5383B;color:#fff}.b.g{background:#12A150;color:#fff}
+  .hide{display:none!important}
 </style>
 </head>
 <body>
@@ -25,68 +31,159 @@
 <iframe id="app" src="https://script.google.com/macros/s/AKfycbzyWlaW9TexY96j-JrHJqhp6RjIy9CchrslKSBB652UoAsn1mpQB6kCu07bl858Eipr/exec" allow="camera *; microphone *; fullscreen *; clipboard-write *" allowfullscreen></iframe>
 
 <div id="sc">
-  <h3>📷 สแกน QR Code กรมบังคับคดี</h3>
-  <div class="box" id="box"><video id="v" playsinline muted></video><div class="fr"></div></div>
+  <h3 id="ttl">📷 สแกนบาร์โค้ดกรมบังคับคดี</h3>
+  <div class="box" id="box"><video id="v" playsinline muted></video><div class="fr"></div><button class="torch hide" id="tch" onclick="torch()" aria-label="ไฟฉาย">🔦</button></div>
   <div id="msg">กำลังเปิดกล้อง...</div>
   <div>
-    <label class="b w">📁 ถ่ายรูป / เลือกรูป QR<input type="file" accept="image/*" capture="environment" hidden onchange="fileScan(this.files[0])"></label>
-    <button class="b r" onclick="closeScan(true)">ยกเลิก</button>
+    <label class="b w">📁 ถ่ายรูป / เลือกรูปบาร์โค้ด<input type="file" accept="image/*" capture="environment" hidden onchange="fileScan(this.files[0]);this.value=''"></label>
+    <button class="b g hide" id="bdone" onclick="closeScan()">✔ เสร็จสิ้น</button>
+    <button class="b r" id="bcancel" onclick="closeScan()">ยกเลิก</button>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" onerror="loadZx()"></script>
 <script>
-/* หน้านี้เป็นหน้าระดับบนสุด จึงเปิดกล้องได้ — สแกนเสร็จส่งข้อความกลับไปที่ระบบ E-Filing */
+/* หน้านี้เป็นหน้าระดับบนสุด จึงเปิดกล้องได้ (กล้องในกรอบ Apps Script ถูก Google บล็อก)
+   สแกนได้ทั้งบาร์โค้ด (Code 128 ฯลฯ) และ QR — สแกนเสร็จส่งข้อความกลับไปที่ระบบ E-Filing */
 const $=id=>document.getElementById(id);
-let src=null,stream=null,on=false,t=0;
+let src=null,stream=null,track=null,on=false,busy=false,t=0,cont=false,n=0,last='',lastT=0,tOn=false;
 const cv=document.createElement('canvas');
+let BD=null,ZR=null;
+
+function loadZx(){const s=document.createElement('script');s.src='https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js';document.head.appendChild(s);}
+
+function initDec(){
+  if(!BD&&('BarcodeDetector' in window)){
+    try{BD=new BarcodeDetector({formats:['code_128','code_39','ean_13','ean_8','upc_a','itf','qr_code']});}catch(e){BD=null;}
+  }
+  if(!ZR&&window.ZXing){
+    try{
+      const h=new Map(),F=ZXing.BarcodeFormat;
+      h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.CODE_128,F.CODE_39,F.EAN_13,F.EAN_8,F.UPC_A,F.ITF,F.QR_CODE]);
+      h.set(ZXing.DecodeHintType.TRY_HARDER,true);
+      ZR=new ZXing.MultiFormatReader();ZR.setHints(h);
+    }catch(e){ZR=null;}
+  }
+}
+async function decode(c){
+  if(BD){try{const r=await BD.detect(c);if(r&&r.length&&r[0].rawValue)return String(r[0].rawValue);}catch(e){}}
+  if(ZR){try{
+    const lum=new ZXing.HTMLCanvasElementLuminanceSource(c),bm=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+    return String(ZR.decode(bm).getText());
+  }catch(e){}}
+  if(window.jsQR){try{
+    const cx=c.getContext('2d'),r=jsQR(cx.getImageData(0,0,c.width,c.height).data,c.width,c.height,{inversionAttempts:'dontInvert'});
+    if(r&&r.data)return String(r.data);
+  }catch(e){}}
+  return '';
+}
+
 addEventListener('message',e=>{
   const m=e.data;
-  if(!m||m.ef!=='scan-request')return;
+  if(!m)return;
   if(!/(^https:\/\/script\.google\.com$)|(\.googleusercontent\.com$)/.test(e.origin))return;
-  src=e.source;
-  try{src.postMessage({ef:'scan-ack'},'*');}catch(x){}
-  openScan();
+  if(m.ef==='scan-request'){
+    src=e.source;cont=!!m.cont;
+    try{src.postMessage({ef:'scan-ack'},'*');}catch(x){}
+    openScan();
+  }else if(m.ef==='scan-status'){
+    if(m.close){closeScan();return;}
+    if(!cont||!on)return;
+    const box=$('box');box.classList.add('hit');setTimeout(()=>box.classList.remove('hit'),700);
+    if(m.ok){setMsg('ok','✔ '+(m.name||m.text)+' — เลือกแล้วทั้งหมด '+(m.count||0)+' กรม');}
+    else setMsg('err','ไม่พบ "'+String(m.text||'').slice(0,40)+'" ในระบบ');
+  }
 });
+function setMsg(cls,txt){const el=$('msg');el.className=cls||'';el.textContent=txt;}
+
 async function openScan(){
-  $('sc').classList.add('on');$('box').style.display='';$('msg').textContent='กำลังเปิดกล้อง...';
+  initDec();
+  n=0;last='';lastT=0;tOn=false;
+  $('ttl').textContent=cont?'📷 สแกนเลือกกรมที่ส่งแล้ว':'📷 สแกนบาร์โค้ดกรมบังคับคดี';
+  $('bdone').classList.toggle('hide',!cont);$('bcancel').classList.toggle('hide',cont);
+  $('sc').classList.add('on');$('box').style.display='';$('tch').classList.add('hide');
+  setMsg('','กำลังเปิดกล้อง...');
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('nocam');
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    track=stream.getVideoTracks()[0]||null;
     const v=$('v');v.srcObject=stream;await v.play();
-    $('msg').textContent='ส่องกล้องไปที่ QR Code ของกรม ให้อยู่ในกรอบ';on=true;loop();
+    try{
+      const cap=track&&track.getCapabilities?track.getCapabilities():null;
+      if(cap&&cap.torch)$('tch').classList.remove('hide');
+      if(cap&&cap.focusMode&&cap.focusMode.indexOf('continuous')>-1)track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+    }catch(x){}
+    setMsg('',cont?'ส่องบาร์โค้ดของแต่ละกรมได้ต่อเนื่อง — ติ๊ดแล้วเลือกให้อัตโนมัติ':'ส่องกล้องไปที่บาร์โค้ดบนหน้าซอง ให้อยู่ในกรอบ (ถือห่าง 15–25 ซม. ให้ภาพชัด)');
+    on=true;loop();
   }catch(e){
     $('box').style.display='none';
-    $('msg').innerHTML='เปิดกล้องสดไม่ได้ ('+(e&&e.name||'error')+') — กรุณาอนุญาตกล้องของเว็บนี้ในเบราว์เซอร์ หรือกด <b>"ถ่ายรูป / เลือกรูป QR"</b> ด้านล่างแทน';
+    setMsg('err','เปิดกล้องสดไม่ได้ ('+(e&&e.name||'error')+') — กรุณาอนุญาตกล้องของเว็บนี้ในเบราว์เซอร์ (คลิกรูปกุญแจ/ปุ่มตั้งค่าหน้าเว็บข้างช่องที่อยู่ลิงก์ → กล้อง → อนุญาต แล้วรีเฟรช) หรือกดปุ่ม "ถ่ายรูป / เลือกรูปบาร์โค้ด" ด้านล่างแทน');
   }
 }
-function loop(){
+async function torch(){
+  if(!track)return;
+  try{tOn=!tOn;await track.applyConstraints({advanced:[{torch:tOn}]});$('tch').classList.toggle('on',tOn);}catch(e){tOn=false;}
+}
+async function loop(){
   if(!on)return;
   const v=$('v');
-  if(v.readyState>=2&&v.videoWidth&&window.jsQR){
-    const w=Math.min(640,v.videoWidth),h=Math.round(v.videoHeight*w/v.videoWidth);
-    cv.width=w;cv.height=h;const cx=cv.getContext('2d');cx.drawImage(v,0,0,w,h);
-    const r=jsQR(cx.getImageData(0,0,w,h).data,w,h,{inversionAttempts:'dontInvert'});
-    if(r&&r.data){done(r.data);return;}
+  if(v.readyState>=2&&v.videoWidth&&!busy){
+    busy=true;
+    /* บาร์โค้ดบนหน้าซองเล็ก: ตัดแถบกลางภาพ (ตรงกับกรอบ) และไม่ย่อภาพ · ทุก 3 เฟรมลองอ่านภาพเต็มด้วย */
+    n++;
+    const vw=v.videoWidth,vh=v.videoHeight,full=(n%3===0);
+    const sx=full?0:vw*0.06,sy=full?0:vh*0.25,sw=full?vw:vw*0.88,sh=full?vh:vh*0.5;
+    const w=Math.min(1600,Math.round(sw)),h=Math.max(1,Math.round(sh*w/sw));
+    cv.width=w;cv.height=h;cv.getContext('2d').drawImage(v,sx,sy,sw,sh,0,0,w,h);
+    let txt='';
+    try{txt=await decode(cv);}catch(e){}
+    busy=false;
+    if(txt&&on){
+      const now=Date.now();
+      if(!(txt===last&&now-lastT<2500)){last=txt;lastT=now;hit(txt);if(!on)return;}
+    }
   }
-  t=setTimeout(loop,120);
+  t=setTimeout(loop,110);
 }
-function fileScan(f){
-  if(!f)return;const rd=new FileReader();
-  rd.onload=e=>{const im=new Image();im.onload=()=>{
-    const s=Math.min(1,1400/Math.max(im.width,im.height)),w=Math.round(im.width*s),h=Math.round(im.height*s);
-    const c=document.createElement('canvas');c.width=w;c.height=h;const cx=c.getContext('2d');cx.drawImage(im,0,0,w,h);
-    const r=window.jsQR&&jsQR(cx.getImageData(0,0,w,h).data,w,h,{inversionAttempts:'attemptBoth'});
-    if(r&&r.data)done(r.data);else $('msg').textContent='อ่าน QR จากรูปไม่ได้ — ลองถ่ายใหม่ให้ QR อยู่กลางภาพและชัดเจน';
-  };im.src=e.target.result;};rd.readAsDataURL(f);
-}
-function done(text){
+function hit(text){
   if(navigator.vibrate){try{navigator.vibrate(60);}catch(e){}}
-  closeScan(false);
-  try{src&&src.postMessage({ef:'scan-result',text:text},'*');}catch(e){}
+  if(cont){
+    try{src&&src.postMessage({ef:'scan-result',text:text,cont:true},'*');}catch(e){}
+    setMsg('','อ่านได้ "'+text.slice(0,30)+'" — กำลังตรวจสอบ...');
+  }else{
+    closeScan();
+    try{src&&src.postMessage({ef:'scan-result',text:text,cont:false},'*');}catch(e){}
+  }
+}
+/* อ่านจากรูปถ่าย: ลองขนาดใหญ่ก่อน แล้วลองหมุน 90° */
+function fileScan(f){
+  if(!f)return;
+  initDec();
+  setMsg('','กำลังอ่านรูป...');
+  const rd=new FileReader();
+  rd.onload=e=>{const im=new Image();im.onload=async()=>{
+    let txt='';
+    for(const mx of [3000,1600]){
+      const s=Math.min(1,mx/Math.max(im.width,im.height)),w=Math.round(im.width*s),h=Math.round(im.height*s);
+      const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);
+      txt=await decode(c);if(txt)break;
+      const r=document.createElement('canvas');r.width=h;r.height=w;
+      const x=r.getContext('2d');x.translate(h,0);x.rotate(Math.PI/2);x.drawImage(c,0,0);
+      txt=await decode(r);if(txt)break;
+    }
+    if(txt){
+      if(navigator.vibrate){try{navigator.vibrate(60);}catch(e){}}
+      if(cont){try{src&&src.postMessage({ef:'scan-result',text:txt,cont:true},'*');}catch(e){}setMsg('','อ่านได้ "'+txt.slice(0,30)+'" — กำลังตรวจสอบ...');}
+      else{closeScan();try{src&&src.postMessage({ef:'scan-result',text:txt,cont:false},'*');}catch(e){}}
+    }else setMsg('err','อ่านบาร์โค้ดจากรูปไม่ได้ — ลองถ่ายใหม่ให้ใกล้ขึ้น ให้บาร์โค้ดอยู่กลางภาพ ชัด ไม่เอียง และไม่สะท้อนแสง');
+  };im.onerror=()=>setMsg('err','เปิดรูปไม่สำเร็จ');im.src=e.target.result;};
+  rd.readAsDataURL(f);
 }
 function closeScan(){
-  on=false;clearTimeout(t);
+  on=false;busy=false;clearTimeout(t);
   if(stream){stream.getTracks().forEach(x=>x.stop());stream=null;}
+  track=null;tOn=false;
   $('sc').classList.remove('on');
 }
 </script>
